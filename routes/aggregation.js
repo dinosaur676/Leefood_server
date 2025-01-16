@@ -4,9 +4,8 @@ const fs = require("fs");
 const XLSX = require("xlsx");
 const path = require("node:path");
 
-
 const InputDto = require("../dtos/input_dto")
-const {insertAggregationSetting, selectAggregationSetting, deleteAggregationSetting, updateAggregationSetting} = require("../db/database");
+const {insertAggregationSetting, selectAggregationSetting, deleteAggregationSetting, updateAggregationSetting} = require("../db/aggregation_db");
 
 router.post('/', async function (req, res, next) {
     const params = req.body;
@@ -50,28 +49,33 @@ router.post('/', async function (req, res, next) {
         if(resultJson[type] == null)
             resultJson[type] = []
 
-
+        const inputDict = {}
         for(const readExcelItem of excelToJson) {
-            const inputDict = {}
+            const productNumberLabel = readTypeDict["상품번호"];
 
+            if(inputDict[readExcelItem[productNumberLabel]] == null)
+                inputDict[readExcelItem[productNumberLabel]] = [];
+
+
+            const subLabelDict = {}
 
             for (const label of labelListByType) {
-                inputDict[label] = readExcelItem[readTypeDict[label]]
+                subLabelDict[label] = readExcelItem[readTypeDict[label]];
             }
 
-            resultJson[type].push(inputDict)
+            inputDict[readExcelItem[productNumberLabel]].push(subLabelDict);
+        }
+
+        for(const inputKey of Object.keys(inputDict)) {
+            inputDict[inputKey].forEach((item) => {
+                resultJson[type].push(item)
+            })
         }
     }
 
     Object.keys(resultJson).forEach((type) => {
-        const worksheet = XLSX.utils.json_to_sheet(resultJson[type]);
-
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
-
-        const resultfileName = `${type} 취합.xlsx`;
-        const resultFilePath = path.join(folderPath, resultfileName);
-        XLSX.writeFile(workbook, resultFilePath);
+        writeExcel(folderPath, `${type} 취합.xlsx`, resultJson[type]);
+        getQuantity(folderPath, `${type} 수량.xlsx`, resultJson[type]);
     })
 
 
@@ -153,4 +157,50 @@ async function getExcelToJson(filePath) {
         console.error("Error reading Excel file:", err.message);
         throw err;
     }
+}
+
+function writeExcel(folderPath, fileName, jsonData) {
+    const worksheet = XLSX.utils.json_to_sheet(jsonData);
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
+
+    const resultFilePath = path.join(folderPath, fileName);
+    XLSX.writeFile(workbook, resultFilePath);
+}
+
+function getQuantity(folderPath, fileName, jsonData) {
+    const sumDict = {};
+    const resultData = [];
+
+    for(const data of jsonData) {
+        const productName = data["상품명1"];
+        const productDetail = data["상품상세1"] == null ? "" : data["상품상세1"];
+        const quantity = parseInt(data["수량(A타입)"]);
+
+        if(sumDict[productName] == null)
+            sumDict[productName] = {};
+
+        if(sumDict[productName][productDetail] == null)
+            sumDict[productName][productDetail] = 0
+
+        sumDict[productName][productDetail] += quantity;
+    }
+
+    Object.keys(sumDict).forEach((pdName) => {
+        Object.keys(sumDict[pdName]).forEach((pdDetail) => {
+
+            const data = {
+                "상품명" : pdName,
+                "상품상세" : pdDetail,
+                "수량": sumDict[pdName][pdDetail]
+            }
+
+            resultData.push(data);
+        })
+    })
+
+    writeExcel(folderPath, fileName, resultData);
+
+
 }
